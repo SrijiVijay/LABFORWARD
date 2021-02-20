@@ -1,0 +1,87 @@
+version: '3'   
+services:
+     serviceregistry:
+         restart: always
+         image: nsriji/serviceregistry        
+         container_name: serviceregistry
+         ports:
+            - 8761:8761
+         networks:
+            - spring-cloud-network
+         healthcheck:
+            test: ["CMD", "ping", "-c","1", "localhost:8761"]
+            interval: 10s
+            timeout: 20s
+            retries: 3     
+     configserver:
+          restart: always
+          image: nsriji/configserverd
+          container_name: configserver
+          ports:
+             - 8888:8888
+          networks:
+             - spring-cloud-network
+          healthcheck:
+             test: ["CMD", "ping", "-c","1", "localhost:8888"]
+             interval: 10s
+             timeout: 20s
+             retries: 3
+          depends_on:
+                - serviceregistry
+          environment:
+             EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://serviceregistry:8761/eureka
+             SPRING_CLOUD_CONFIG_SERVER_GIT_URI: https://github.com/SrijiVijay/COMMON_CONFIG.git
+     reverseproxy:
+          restart: always
+          hostname: reverseproxy
+          image: nsriji/reverseproxy
+          container_name: reverseproxy
+          ports:
+             - 8085:8085
+          networks:
+             - spring-cloud-network
+          depends_on:
+              - serviceregistry
+              - configserver
+          healthcheck:
+             test: ["CMD", "ping", "-c","1", "localhost:8085"]
+             interval: 10s
+             timeout: 20s
+             retries: 3
+          command: >
+             -c "
+             while ! (nc -z configserver 8888); do sleep 5; echo 'Waiting for config-server services to start-up...'; done;
+             java -Xdebug -Xrunjdwp:server=y,transport=dt_socket,address=8787,suspend=n -jar 
+             -Dspring.profiles.active=dev /app.jar"
+          environment:
+             EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://serviceregistry:8761/eureka
+             SPRING_CLOUD_CONFIG_SERVER_GIT_URI: https://github.com/SrijiVijay/COMMON_CONFIG.git
+     personservice:
+          restart: always
+          image: nsriji/personservice
+          container_name: personservice
+          ports:
+             - 8089:8089
+          networks:
+             - spring-cloud-network
+          depends_on:
+              - serviceregistry
+              - configserver
+              - reverseproxy
+          healthcheck:
+             test: ["CMD", "ping", "-c","1", "localhost:8089"]
+             interval: 10s
+             timeout: 20s
+             retries: 3
+          environment:
+             SPRING_PROFILES_ACTIVE: dev
+             EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://serviceregistry:8761/eureka
+             SPRING_CLOUD_CONFIG_SERVER_GIT_URI: https://github.com/SrijiVijay/COMMON_CONFIG.git
+          command: >
+             -c "
+             while ! (nc -z serviceregistry 8761 && nc -z configserver 8888 ); do sleep 5; echo 'Waiting for config-server services to start-up...'; done;
+             java -Xdebug -Xrunjdwp:server=y,transport=dt_socket,address=8787,suspend=n -jar 
+             -Dspring.profiles.active=dev /app.jar"
+networks:
+   spring-cloud-network:
+             driver: bridge
